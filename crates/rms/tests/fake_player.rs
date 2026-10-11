@@ -33,13 +33,14 @@ struct Server {
 impl Drop for Server {
     fn drop(&mut self) {
         let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 
 fn start_server(music: &Path) -> Server {
     let dir = tempfile::tempdir().unwrap();
     let (http, cli, slim) = (free_port(), free_port(), free_port());
-    let child = Command::new(env!("CARGO_BIN_EXE_rms"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_rms"))
         .args([
             "--data-dir",
             dir.path().to_str().unwrap(),
@@ -75,6 +76,8 @@ fn start_server(music: &Path) -> Server {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+    let _ = child.kill();
+    let _ = child.wait();
     panic!("server did not start");
 }
 

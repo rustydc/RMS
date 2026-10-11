@@ -70,7 +70,6 @@ pub struct Server {
     pub dispatch: DispatchTable,
     pub library: Library,
     pub http: reqwest::Client,
-    pub start_time: f64,
     players: RwLock<IndexMap<MacAddress, Arc<Player>>>,
     conns: Mutex<std::collections::HashMap<MacAddress, Conn>>,
     next_conn_id: AtomicU64,
@@ -132,7 +131,6 @@ impl Server {
             dispatch: crate::control::build_dispatch_table(),
             library,
             http,
-            start_time: crate::util::now(),
             players: RwLock::new(IndexMap::new()),
             conns: Mutex::new(Default::default()),
             next_conn_id: AtomicU64::new(1),
@@ -374,11 +372,10 @@ impl Server {
                 && !helo.reconnect
                 && c.is_active(player.id)
                 && c.active_players().len() == 1
+                && !c.is_stopped()
             {
-                if !c.is_stopped() {
-                    info!("{}: restarting play on pseudo-reconnect", player.id);
-                    c.player_reconnect(helo.bytes_received);
-                }
+                info!("{}: restarting play on pseudo-reconnect", player.id);
+                c.player_reconnect();
             }
             if c.is_stopped() {
                 player.strm_stop();

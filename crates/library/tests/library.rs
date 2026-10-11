@@ -352,7 +352,7 @@ fn cue_sheets() {
     // the referenced file is a hidden container
     let base = f
         .lib
-        .track_by_url(&rms_library::url::strip_anchor(&tr.url).to_string())
+        .track_by_url(rms_library::url::strip_anchor(&tr.url))
         .unwrap();
     assert_eq!(base.content_type, "cur");
     assert!(!base.audio);

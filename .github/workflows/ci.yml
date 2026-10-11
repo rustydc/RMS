@@ -32,9 +32,8 @@ jobs:
       - name: Formatting
         run: cargo fmt --all --check
 
-      # Fails on clippy errors; existing warnings are reported but allowed for now.
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Tests
         run: cargo test --workspace --locked

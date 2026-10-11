@@ -13,7 +13,10 @@
 macro_rules! re {
     ($s:expr) => {{
         static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-        RE.get_or_init(|| regex::Regex::new($s).unwrap())
+        fn compile() -> regex::Regex {
+            regex::Regex::new($s).unwrap()
+        }
+        RE.get_or_init(compile)
     }};
 }
 
@@ -408,11 +411,7 @@ impl Library {
         }
         let summary = sc.summary.clone();
         drop(sc);
-        if changes > 0 || wipe {
-            let t = scanner::now();
-            db::set_meta(c, "lastRescanTime", &t.to_string())?;
-            self.inner.progress.lock().last_scan = Some(t);
-        } else if self.inner.progress.lock().last_scan.is_none() {
+        if changes > 0 || wipe || self.inner.progress.lock().last_scan.is_none() {
             let t = scanner::now();
             db::set_meta(c, "lastRescanTime", &t.to_string())?;
             self.inner.progress.lock().last_scan = Some(t);

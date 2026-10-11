@@ -94,15 +94,6 @@ impl Manager {
         info!("cometd client {} removed", clid);
     }
 
-    fn queue(&self, clid: &str, events: Vec<Value>) {
-        if let Some(c) = self.clients.lock().get_mut(clid) {
-            c.pending.extend(events);
-            if let Some(n) = &c.poll {
-                n.notify_one();
-            }
-        }
-    }
-
     /// `deliver_events`: to `clid` and to every client subscribed to a matching channel.
     pub fn deliver(&self, events: Vec<Value>, clid: Option<&str>) {
         let mut clients = self.clients.lock();
@@ -744,9 +735,7 @@ async fn handle_request(
 pub fn status_text(req: &Request) -> &'static str {
     use crate::control::request::Status::*;
     match req.status {
-        New => "New",
         Dispatchable => "Dispatchable",
-        Processing => "Processing",
         Done => "Done",
         BadDispatch => "Bad dispatch!",
         BadParams => "Bad params!",

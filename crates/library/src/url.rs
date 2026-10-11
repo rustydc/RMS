@@ -91,10 +91,7 @@ pub fn path_from_file_url(u: &str) -> Option<PathBuf> {
     let mut rest = &u[7..];
     // host part (should be empty or localhost)
     if !rest.starts_with('/') {
-        match rest.find('/') {
-            Some(i) => rest = &rest[i..],
-            None => return None,
-        }
+        rest = &rest[rest.find('/')?..];
     }
     let rest = match rest.find('#') {
         Some(i) => &rest[..i],
