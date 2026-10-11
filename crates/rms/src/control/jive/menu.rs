@@ -60,6 +60,7 @@ pub fn main_menu(server: &Arc<Server>, p: Option<&Arc<Player>>) -> Vec<Value> {
     menu.extend(internet_radio_menu());
     menu.push(album_sort_settings_item());
     menu.extend(my_music_menu(server, p));
+    menu.extend(crate::plugins::randomplay::jive_menu());
     if super::has_recent_searches() {
         menu.extend(recent_search_menu());
     }

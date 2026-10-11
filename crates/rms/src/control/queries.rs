@@ -1053,6 +1053,17 @@ pub fn alarm_playlists(server: &Arc<Server>, r: &mut Request) {
     item.insert("url".into(), Value::Null);
     item.insert("singleton".into(), json!("1"));
     r.add_loop_item("item_loop", item);
+    for (title, url) in crate::plugins::randomplay::alarm_playlists() {
+        let mut item = Results::new();
+        item.insert(
+            "category".into(),
+            json!(crate::strings::s("PLUGIN_RANDOMPLAY")),
+        );
+        item.insert("title".into(), json!(title));
+        item.insert("url".into(), json!(url));
+        item.insert("singleton".into(), json!("0"));
+        r.add_loop_item("item_loop", item);
+    }
     for (title, url) in server.favorites.flat_audio() {
         let mut item = Results::new();
         item.insert("category".into(), json!("Favorites"));

@@ -79,6 +79,7 @@ pub struct Server {
     pub shutdown: CancellationToken,
     pub scanning: AtomicBool,
     pub favorites: crate::plugins::favorites::Favorites,
+    pub randomplay: crate::plugins::randomplay::RandomPlay,
     pub cometd: crate::web::cometd::Manager,
     pub subscriptions: crate::control::subscribe::Subscriptions,
 }
@@ -139,6 +140,7 @@ impl Server {
             shutdown: CancellationToken::new(),
             scanning: AtomicBool::new(false),
             favorites,
+            randomplay: Default::default(),
             cometd: crate::web::cometd::Manager::default(),
             subscriptions: Default::default(),
             config,

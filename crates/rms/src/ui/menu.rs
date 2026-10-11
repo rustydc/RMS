@@ -128,6 +128,16 @@ pub fn overlay(item: &Value, base: Option<&Value>) -> String {
 /// item's `itemsParams` merged in (unavailable when the item lacks them).  `<name>Action`
 /// on the item redirects to another action (e.g. `goAction: play`).
 pub fn action(item: &Value, base: Option<&Value>, name: &str) -> Option<Value> {
+    let mut a = find_action(item, base, name)?;
+    // an item's own `nextWindow` applies to its actions (SqueezePlay), e.g. Random Mix's
+    // "Song Mix" going to Now Playing
+    if let (Some(nw), Some(obj)) = (item.get("nextWindow"), a.as_object_mut()) {
+        obj.entry("nextWindow").or_insert_with(|| nw.clone());
+    }
+    Some(a)
+}
+
+fn find_action(item: &Value, base: Option<&Value>, name: &str) -> Option<Value> {
     let name = item
         .get(format!("{name}Action"))
         .and_then(Value::as_str)
@@ -194,6 +204,20 @@ pub fn next_window(action: &Value) -> Option<&str> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn item_next_window_applies_to_its_actions() {
+        let item = json!({ "nextWindow": "nowPlaying",
+            "actions": { "go": { "cmd": ["randomplay", "tracks"] }, "do": { "cmd": ["x"], "nextWindow": "parent" } } });
+        assert_eq!(
+            next_window(&action(&item, None, "go").unwrap()),
+            Some("nowPlaying")
+        );
+        assert_eq!(
+            next_window(&action(&item, None, "do").unwrap()),
+            Some("parent")
+        );
+    }
 
     #[test]
     fn base_actions_with_items_params() {

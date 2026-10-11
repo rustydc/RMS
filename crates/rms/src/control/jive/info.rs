@@ -993,15 +993,28 @@ async fn genre_menu(server: &Arc<Server>, r: &Request, menu_mode: bool) -> Optio
         "genres_loop",
     )
     .await;
+    let genre = get(&row, "genre").unwrap_or_default();
     let items = if menu_mode {
         let mut v = playlistcontrol_trio(&obj(json!({ "genre_id": id })), Some("itemplay"));
         v.push(mix_item("genre_id", json!(id)));
+        // Random Mix's genre items (`_genreInfoMenu`)
+        for (mode, what) in [("tracks", "SONGS"), ("albums", "ALBUMS")] {
+            let go = json!({ "player": 0, "cmd": ["randomplay", mode], "params": { "genre_id": id }, "nextWindow": "nowPlaying" });
+            let name = format!(
+                "{} {} {} {}",
+                s("PLUGIN_RANDOMPLAY"),
+                s("GENRE"),
+                s(what),
+                genre
+            );
+            v.push(jive_item(name, None, None, json!({ "go": go, "play": go })));
+        }
         v
     } else {
         vec![]
     };
     Some(Feed {
-        title: Some(get(&row, "genre").unwrap_or_default()),
+        title: Some(genre),
         items,
         menu_complete: true,
         ..Default::default()

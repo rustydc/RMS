@@ -130,7 +130,23 @@ The script builds a release binary (the web UI is built in), installs it as
   player (time entry, days, sound, shuffle, repeat, volume) like Lyrion's player screens.  The menus are the
   same Jive menus Squeezer uses, so everything browsable there is browsable on the player.
 * **Plugins**: Favorites (OPML, compatible with Lyrion's `favorites.opml`), alarm clock,
-  a small internet radio directory, Don't Stop The Music and Create Mix, Spotify (below).
+  a small internet radio directory, Random Mix, Don't Stop The Music and Create Mix,
+  Spotify (below).
+
+### Random Mix
+
+Plays random music from your library, as Lyrion's Random Mix plugin does: a **Song Mix**,
+**Album Mix** (one random album after another), **Artist Mix** or **Year Mix** (random songs
+from one random year, then another).  It is under *Library → Random Mix* in the web UI and
+*My Music → Random Mix* on Squeezer, the Touch/Radio and the players' own menus; alarms can
+start one too.
+
+The mix keeps going: when a song starts, played songs beyond the number to keep (10) are
+removed and new ones are added, so that 10 songs are always coming up (or the next album or
+artist once the last one is playing).  Choose the genres mixes use, and these numbers,
+on the Random Mix page (Lyrion's prefs `plugin.randomplay:exclude_genres`, `newtracks`,
+`oldtracks`, `continuous`).  A mix ends when you stop it, or when you replace the queue with
+something else.  Don't Stop The Music stands aside while a mix is running.
 
 ### Don't Stop The Music and Create Mix
 
@@ -193,10 +209,11 @@ app is only a player, not a library browser — use the web UI or Squeezer to br
 
 * One transcoder (ffmpeg) replaces Lyrion's `convert.conf` helper chain (flac, sox, lame,
   faad…); per-format enable/disable is not configurable yet.
-* Only a few plugins exist (Favorites, alarms, radio directory, Don't Stop The Music,
-  Spotify).  Other streaming services (Qobuz, TIDAL…), the Random Mix plugin and the TuneIn
-  directory are not ported; Spotify, including Spotify Connect, is built in rather than
-  through Spotty.
+* Only a few plugins exist (Favorites, alarms, radio directory, Random Mix, Don't Stop
+  The Music, Spotify).  Other streaming services (Qobuz, TIDAL…) and the TuneIn directory
+  are not ported; Spotify, including Spotify Connect, is built in rather than through
+  Spotty.  Random Mix has no "Work Mix" (the playlist commands can't queue a work yet) and
+  no library view choice (RMS has no virtual libraries).
 * The on-screen menus follow the Jive menu layout (as on a Squeezebox Touch/Radio) rather
   than every legacy `Slim::Buttons` screen: e.g. track info lists Play / Add first.
   Squeezebox 1 and SliMP3 (text displays) are not supported.

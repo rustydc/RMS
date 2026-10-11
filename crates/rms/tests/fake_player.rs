@@ -922,3 +922,103 @@ fn dont_stop_the_music_adds_songs_and_create_mix_plays_a_mix() {
     let first = cli(server.cli, &format!("{MAC_S} playlist path 0 ?"));
     assert_eq!(first.last(), Some(seed_url), "{first:?}");
 }
+
+fn queued_paths(server: &Server) -> Vec<String> {
+    (0..playlist_count(server))
+        .filter_map(|i| {
+            cli(server.cli, &format!("{MAC_S} playlist path {i} ?"))
+                .last()
+                .cloned()
+        })
+        .collect()
+}
+
+fn random_mix(server: &Server) -> String {
+    // `_randomplayisactive` is rendered as a bare value
+    let r = cli(server.cli, &format!("{MAC_S} randomplayisactive"));
+    match r.last().map(String::as_str) {
+        Some("randomplayisactive") | None => String::new(),
+        Some(v) => v.to_string(),
+    }
+}
+
+#[test]
+fn random_mix_keeps_going_until_the_queue_is_replaced() {
+    let Some((music, files)) = make_tagged_music() else {
+        eprintln!("skipped: no ffmpeg");
+        return;
+    };
+    let server = start_server(music.path());
+    let mut p = FakePlayer::connect(server.slim);
+    p.expect(b"audg", Duration::from_secs(5));
+    let tracks = scanned_tracks(&server, 3);
+    let url_of = |i: usize| {
+        tracks
+            .iter()
+            .find(|(_, u)| u.ends_with(&format!("0{}%20song.mp3", i + 1)))
+            .unwrap()
+            .1
+            .clone()
+    };
+    cli(server.cli, "pref plugin.randomplay:newtracks 2");
+
+    // a song mix: 2 songs, then topped up to 2 upcoming when the first one starts
+    cli(server.cli, &format!("{MAC_S} randomplay tracks"));
+    assert_eq!(random_mix(&server), "track");
+    assert_eq!(playlist_count(&server), 2);
+    let strm = p.expect_strm(b's', Duration::from_secs(5));
+    fetch_stream(server.http, &strm);
+    p.stat(b"STMc", 0);
+    p.stat(b"STMs", 0);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while playlist_count(&server) < 3 {
+        assert!(Instant::now() < deadline, "the mix was not topped up");
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    let mut queued = queued_paths(&server);
+    queued.sort();
+    queued.dedup();
+    assert_eq!(queued.len(), 3, "each song once before any repeats");
+
+    // replacing the queue ends the mix
+    let first = files[0].to_str().unwrap().replace(' ', "%20");
+    cli(server.cli, &format!("{MAC_S} playlist play {first}"));
+    assert_eq!(random_mix(&server), "");
+
+    // limited to a genre: the Jazz song only
+    cli(
+        server.cli,
+        &format!("{MAC_S} randomplay tracks genres:Jazz"),
+    );
+    let jazz = queued_paths(&server);
+    assert!(
+        !jazz.is_empty() && jazz.iter().all(|u| *u == url_of(2)),
+        "{jazz:?}"
+    );
+    cli(server.cli, &format!("{MAC_S} randomplay disable"));
+    assert_eq!(random_mix(&server), "");
+
+    // Choose Genres: leaving Jazz out of every mix
+    let genres = cli(server.cli, &format!("{MAC_S} randomplaygenrelist 0 100")).join(" ");
+    assert!(genres.contains("text:Jazz checkbox:1"), "{genres}");
+    cli(server.cli, &format!("{MAC_S} randomplaychoosegenre Jazz 0"));
+    let genres = cli(server.cli, &format!("{MAC_S} randomplaygenrelist 0 100")).join(" ");
+    assert!(genres.contains("text:Jazz checkbox:0"), "{genres}");
+    cli(server.cli, &format!("{MAC_S} randomplay tracks"));
+    let rock = queued_paths(&server);
+    assert!(!rock.is_empty() && !rock.contains(&url_of(2)), "{rock:?}");
+
+    // randomplay:// URLs (alarms, favorites) start a mix too
+    cli(
+        server.cli,
+        &format!("{MAC_S} playlist play randomplay://album"),
+    );
+    assert_eq!(random_mix(&server), "album");
+    let alarms = cli(server.cli, &format!("{MAC_S} alarm playlists 0 100")).join(" ");
+    assert!(alarms.contains("url:randomplay://track"), "{alarms}");
+
+    // the My Music node on Squeezer / Touch / Radio
+    let home = cli(server.cli, &format!("{MAC_S} menu 0 500 direct:1")).join(" ");
+    assert!(home.contains("id:randomplay"), "{home}");
+    assert!(home.contains("id:randomtracks"), "{home}");
+}

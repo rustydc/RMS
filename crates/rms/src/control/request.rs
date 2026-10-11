@@ -32,6 +32,8 @@ pub enum Source {
     Cli(u64),
     JsonRpc,
     Cometd(String),
+    /// A plugin's own commands (e.g. Random Mix topping up the queue).
+    Plugin(&'static str),
 }
 
 #[derive(Debug, Clone)]

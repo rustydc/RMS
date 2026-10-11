@@ -36,6 +36,23 @@ fn ids_sql(n: usize) -> String {
     vec!["?"; n].join(",")
 }
 
+/// ` AND tracks.id IN (songs of genres)`, or nothing when `genres` is empty.
+fn genre_filter(genres: &[i64], params: &mut Vec<i64>) -> String {
+    if genres.is_empty() {
+        return String::new();
+    }
+    params.extend(genres);
+    format!(
+        " AND tracks.id IN (SELECT track FROM genre_track WHERE genre IN ({}))",
+        ids_sql(genres.len())
+    )
+}
+
+fn shuffled(mut ids: Vec<i64>) -> Vec<i64> {
+    ids.shuffle(&mut rand::rng());
+    ids
+}
+
 fn query_ids(c: &Connection, sql: &str, params: &[i64]) -> Vec<i64> {
     let Ok(mut st) = c.prepare(sql) else {
         return Vec::new();
@@ -112,6 +129,91 @@ impl Library {
             "SELECT DISTINCT tracks.year FROM tracks WHERE {PLAYABLE} AND tracks.year > 0 ORDER BY RANDOM() LIMIT 1"
         );
         query_ids(&c, &sql, &[]).into_iter().next()
+    }
+
+    /// Genres that have playable songs, as (id, name), in name order.
+    pub fn genres(&self) -> Vec<(i64, String)> {
+        let Ok(c) = self.conn() else {
+            return Vec::new();
+        };
+        let sql = format!(
+            "SELECT genres.id, genres.name FROM genres WHERE genres.id IN \
+             (SELECT genre_track.genre FROM genre_track JOIN tracks ON tracks.id = genre_track.track WHERE {PLAYABLE}) \
+             ORDER BY genres.namesort, genres.id"
+        );
+        let Ok(mut st) = c.prepare(&sql) else {
+            return Vec::new();
+        };
+        st.query_map([], |r| {
+            let name = match r.get_ref(1)? {
+                rusqlite::types::ValueRef::Text(t) | rusqlite::types::ValueRef::Blob(t) => {
+                    String::from_utf8_lossy(t).to_string()
+                }
+                _ => String::new(),
+            };
+            Ok((r.get::<_, i64>(0)?, name))
+        })
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
+    }
+
+    /// Every playable song, in `genres` (when not empty) and `year`, shuffled: the list a
+    /// Random Mix of songs works through (`RandomPlay::Mixer::getIdList`).
+    pub fn shuffled_tracks(&self, genres: &[i64], year: Option<i64>) -> Vec<i64> {
+        let Ok(c) = self.conn() else {
+            return Vec::new();
+        };
+        let mut sql = format!("SELECT tracks.id FROM tracks WHERE {PLAYABLE}");
+        let mut params: Vec<i64> = Vec::new();
+        sql += &genre_filter(genres, &mut params);
+        if let Some(y) = year {
+            sql += " AND tracks.year = ?";
+            params.push(y);
+        }
+        shuffled(query_ids(&c, &sql, &params))
+    }
+
+    /// Every album with playable songs in `genres` (when not empty), shuffled.
+    pub fn shuffled_albums(&self, genres: &[i64]) -> Vec<i64> {
+        let Ok(c) = self.conn() else {
+            return Vec::new();
+        };
+        let mut params = Vec::new();
+        let sql = format!(
+            "SELECT DISTINCT tracks.album FROM tracks WHERE {PLAYABLE} AND tracks.album IS NOT NULL{}",
+            genre_filter(genres, &mut params)
+        );
+        shuffled(query_ids(&c, &sql, &params))
+    }
+
+    /// Every artist (artist, album artist or track artist role) with playable songs in
+    /// `genres` (when not empty), shuffled.
+    pub fn shuffled_artists(&self, genres: &[i64]) -> Vec<i64> {
+        let Ok(c) = self.conn() else {
+            return Vec::new();
+        };
+        let mut params = Vec::new();
+        let sql = format!(
+            "SELECT DISTINCT contributor_track.contributor FROM contributor_track \
+             JOIN tracks ON tracks.id = contributor_track.track \
+             WHERE {PLAYABLE} AND contributor_track.role IN ({ROLE_ARTIST}, {ROLE_ALBUMARTIST}, {ROLE_TRACKARTIST}){}",
+            genre_filter(genres, &mut params)
+        );
+        shuffled(query_ids(&c, &sql, &params))
+    }
+
+    /// Every year with playable songs in `genres` (when not empty), shuffled
+    /// (`RandomPlay::Mixer::getRandomYear`).
+    pub fn shuffled_years(&self, genres: &[i64]) -> Vec<i64> {
+        let Ok(c) = self.conn() else {
+            return Vec::new();
+        };
+        let mut params = Vec::new();
+        let sql = format!(
+            "SELECT DISTINCT tracks.year FROM tracks WHERE {PLAYABLE} AND tracks.year > 0{}",
+            genre_filter(genres, &mut params)
+        );
+        shuffled(query_ids(&c, &sql, &params))
     }
 
     /// Genres of the given tracks.

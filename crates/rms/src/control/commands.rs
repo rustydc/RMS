@@ -979,6 +979,13 @@ pub async fn playlist_xitem(server: Arc<Server>, mut r: Request) -> Request {
         return r;
     };
     let cmd = r.term(1).to_string();
+    // `randomplay://<type>` starts a Random Mix (`ProtocolHandler::overridePlayback`)
+    if let Some((kind, genres)) = crate::plugins::randomplay::parse_url(&item) {
+        let add = !matches!(cmd.as_str(), "play" | "load" | "resume");
+        crate::plugins::randomplay::start(&server, &p, kind, genres, add).await;
+        r.set_done();
+        return r;
+    }
     let url = to_url(&item);
     if let Some(title) = r.param_nonempty("_title") {
         if crate::util::is_remote_url(&url) {

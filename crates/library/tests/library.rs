@@ -1037,4 +1037,31 @@ fn mixes_from_the_library() {
     assert!(f.lib.random_album(&[]).is_some());
     assert!(f.lib.random_artist().is_some());
     assert!(f.lib.random_year().is_some());
+
+    // Random Mix: every song / album / artist / year once, in random order
+    let playable = f.lib.shuffled_tracks(&[], None);
+    let mut sorted = playable.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), playable.len(), "no song twice");
+    assert!(playable.contains(&one) && playable.contains(&two));
+    let mut rock_songs = f.lib.shuffled_tracks(&rock, None);
+    rock_songs.sort();
+    assert_eq!(rock_songs, expect);
+    assert_eq!(f.lib.shuffled_tracks(&[], Some(1999)).len(), 1);
+    assert_eq!(f.lib.shuffled_albums(&rock), vec![album]);
+    assert!(f.lib.shuffled_albums(&[]).len() > 1);
+    assert!(!f.lib.shuffled_artists(&rock).is_empty());
+    let years = f.lib.shuffled_years(&[]);
+    assert!(
+        years.contains(&1999) && years.iter().all(|y| *y > 0),
+        "{years:?}"
+    );
+    let genres = f.lib.genres();
+    assert!(
+        genres
+            .iter()
+            .any(|(id, name)| *id == rock[0] && name == "Rock"),
+        "{genres:?}"
+    );
 }

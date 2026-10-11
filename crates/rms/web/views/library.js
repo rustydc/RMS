@@ -1,8 +1,9 @@
-// Library browser: Artists / Albums / Genres / Years / Folders / Playlists / Favorites / Spotify
+// Library browser: Artists / Albums / Genres / Years / Folders / Playlists / Random Mix /
+// Favorites / Spotify
 // with drill-down pages and breadcrumbs.
 //
 // Routes (hash):
-//   #/library/<tab>                 tab = artists|albums|genres|years|folders|playlists|favorites
+//   #/library/<tab>                 tab = artists|albums|genres|years|folders|playlists|random|favorites
 //   #/library/artist/<id>?name=     albums by artist
 //   #/library/album/<id>?name=      album tracks
 //   #/library/genre/<id>?name=      albums in genre
@@ -13,8 +14,8 @@
 //   #/library/spotify/<id>?name=    Spotify menu level (item id; `<n>_<term>` for a search)
 
 import { rpc, itemArt, coverUrl, portraitUrl } from '../api.js';
-import { store } from '../store.js';
-import { h, fmtDuration, plural, storage, toast } from '../util.js';
+import { store, on } from '../store.js';
+import { h, icon, fmtDuration, plural, storage, toast } from '../util.js';
 import {
   enc, pager, list, row, trackRow, albumCard, albumGrid, actionButtons, bigActions,
   pageHeader, emptyBox, errorBox, loadingBox,
@@ -22,10 +23,19 @@ import {
 
 const TABS = [
   ['artists', 'Artists'], ['albums', 'Albums'], ['genres', 'Genres'], ['years', 'Years'],
-  ['folders', 'Folders'], ['playlists', 'Playlists'], ['favorites', 'Favorites'], ['spotify', 'Spotify'],
+  ['folders', 'Folders'], ['playlists', 'Playlists'], ['random', 'Random Mix'], ['favorites', 'Favorites'],
+  ['spotify', 'Spotify'],
 ];
 const TAB_OF = { artist: 'artists', album: 'albums', genre: 'genres', year: 'years', playlist: 'playlists' };
 const ALBUM_TAGS = 'tags:ljaysSKw';
+
+/** Random Mix types: [randomplay mode, title, description, icon, randomplayisactive name]. */
+const RANDOM_MIXES = [
+  ['tracks', 'Song Mix', 'Random songs', 'note', 'track'],
+  ['albums', 'Album Mix', 'One random album after another', 'album', 'album'],
+  ['contributors', 'Artist Mix', 'All the songs of a random artist, then another', 'person', 'contributor'],
+  ['year', 'Year Mix', 'Random songs from one random year, then another', 'calendar', 'year'],
+];
 const TRACK_TAGS = 'tags:aAdlntuKceis';
 
 const NO_MUSIC = () => h('div', {}, h('p', {}, 'Your library is empty.'),
@@ -41,10 +51,20 @@ export function render(node, { parts, query, ctx, scrollRoot }) {
 
   const crumbs = h('nav', { class: 'crumbs', 'aria-label': 'Breadcrumb' });
   const body = h('div', { class: 'lib-body' });
-  node.append(tabsNav(activeTab), crumbs, body);
+  const nav = tabsNav(activeTab);
+  node.append(nav, crumbs, body);
+  // the tab strip scrolls on narrow screens: show the active tab (once the strip has a size;
+  // on phones the library may still be hidden here)
+  const tabObserver = new ResizeObserver(() => {
+    const tab = nav.querySelector('[aria-current]');
+    if (!tab || nav.scrollWidth <= nav.clientWidth) return;
+    const t = tab.getBoundingClientRect(), n = nav.getBoundingClientRect();
+    nav.scrollLeft += t.left - n.left - (n.width - t.width) / 2;
+  });
+  tabObserver.observe(nav);
 
   const v = {
-    ctx, query, body, scrollRoot, alive: true, cleanup: [],
+    ctx, query, body, scrollRoot, alive: true, cleanup: [() => tabObserver.disconnect()],
     crumbs(items) {
       crumbs.hidden = items.length < 2; // top-level tabs already show where you are
       crumbs.replaceChildren(h('ol', {}, items.map((c, i) => h('li', {},
@@ -299,6 +319,105 @@ const ROUTES = {
       sub.textContent = `${plural(n, 'track')}${duration ? ' · ' + fmtDuration(duration) : ''}`;
       return trackRow(v.ctx, t, { showAlbum: true, onPlay: () => playFrom(v.ctx, 'playlist_id', id, i, t.title) });
     }, { empty: 'This playlist is empty.' });
+  },
+
+  // ------------------------------------------------------------ random mix
+  random(v) {
+    v.crumbs([crumbRoot('random')]);
+    const status = h('div', { class: 'random-status', role: 'status' });
+    const genreList = h('div', { class: 'random-genres' }, h('div', { class: 'loading' }, h('span', { class: 'spinner' })));
+    const options = h('div', { class: 'random-options' });
+    v.body.append(
+      h('p', { class: 'muted' }, 'Play random music from your library. The mix keeps going: as songs finish, new ones are added.'),
+      status,
+      h('ul', { class: 'list', 'aria-label': 'Random mixes' }, RANDOM_MIXES.map(([mode, title, sub, iconName]) => {
+        const start = (add) => async (e) => {
+          e?.stopPropagation();
+          if (!store.playerId) { toast('Select a player first', 'error'); return; }
+          const args = ['randomplay', mode];
+          if (add) args.push('add:1');
+          if (await v.ctx.cmd(...args) === null) return;
+          toast(add ? `Adding a random mix: ${title}` : `Playing a random mix: ${title}`);
+          v.ctx.refreshQueue();
+          refreshStatus();
+        };
+        return row({
+          title, sub, iconName, label: `Play ${title}`, onActivate: start(false),
+          actions: h('div', { class: 'actions compact' },
+            h('button', { class: 'icon-btn act-play', type: 'button', 'aria-label': `Play ${title}`, title: 'Play', onclick: start(false) }, icon('play')),
+            h('button', { class: 'icon-btn', type: 'button', 'aria-label': `Add ${title} to the queue`, title: 'Add to queue', onclick: start(true) }, icon('add'))),
+        });
+      })),
+      h('section', { class: 'settings-card random-card', 'aria-labelledby': 'random-genres-h' },
+        h('h2', { id: 'random-genres-h' }, 'Genres to include'), genreList),
+      h('section', { class: 'settings-card random-card', 'aria-labelledby': 'random-options-h' },
+        h('h2', { id: 'random-options-h' }, 'Options'), options));
+
+    async function refreshStatus() {
+      if (!store.playerId) { status.replaceChildren(); return; }
+      const r = await rpc(['randomplayisactive'], store.playerId).catch(() => null);
+      if (!v.alive) return;
+      const kind = r && r._randomplayisactive;
+      const mix = RANDOM_MIXES.find(([, , , , k]) => k === kind);
+      status.replaceChildren(...(mix ? [
+        h('span', {}, icon('shuffle'), ` Playing: ${mix[1]}`),
+        h('button', { class: 'btn', type: 'button', onclick: async () => {
+          if (await v.ctx.cmd('randomplay', 'disable') !== null) { toast('Random Mix stopped'); refreshStatus(); }
+        } }, icon('stop'), 'Stop mix'),
+      ] : []));
+      status.hidden = !mix;
+    }
+
+    async function loadGenres() {
+      const r = await rpc(['randomplaygenrelist', 0, 10000], store.playerId || '').catch(() => null);
+      if (!v.alive) return;
+      const items = (r?.item_loop || []).filter((it) => it.checkbox !== undefined);
+      if (!items.length) { genreList.replaceChildren(h('p', { class: 'muted' }, 'No genres in your library.')); return; }
+      const boxes = items.map((it) => {
+        const id = `rg-${it.text.replace(/\W+/g, '-')}-${Math.random().toString(36).slice(2, 7)}`;
+        const input = h('input', { id, type: 'checkbox', checked: +it.checkbox === 1, onchange: async (e) => {
+          if (await v.ctx.serverCmd('randomplaychoosegenre', it.text, e.target.checked ? 1 : 0) === null) e.target.checked = !e.target.checked;
+        } });
+        return h('label', { class: 'chip-check', for: id }, input, it.text);
+      });
+      const all = (value) => async () => {
+        if (await v.ctx.serverCmd('randomplaygenreselectall', value) !== null) loadGenres();
+      };
+      genreList.replaceChildren(
+        h('div', { class: 'inline-row' },
+          h('button', { class: 'btn', type: 'button', onclick: all(1) }, 'Select all'),
+          h('button', { class: 'btn', type: 'button', onclick: all(0) }, 'Select none')),
+        h('div', { class: 'chip-checks' }, boxes),
+        h('p', { class: 'muted small' }, 'With every genre or none selected, mixes use the whole library.'));
+    }
+
+    async function loadOptions() {
+      const names = ['plugin.randomplay:newtracks', 'plugin.randomplay:oldtracks', 'plugin.randomplay:continuous'];
+      const vals = await Promise.all(names.map((n) => rpc(['pref', n, '?']).then((r) => r._p2).catch(() => undefined)));
+      if (!v.alive) return;
+      const [newtracks, oldtracks, continuous] = vals;
+      const save = async (name, value) => { if (await v.ctx.serverCmd('pref', name, value) !== null) toast('Setting saved'); };
+      const num = (label, name, value, min, help) => {
+        const id = `rp-${name.split(':')[1]}`;
+        return h('div', { class: 'field' },
+          h('label', { for: id }, label),
+          h('input', { id, type: 'number', min, max: 100, step: 1, value: value ?? '', class: 'num-input',
+            onchange: (e) => { const n = Math.round(+e.target.value); if (e.target.value !== '' && n >= min && n <= 100) save(name, n); } }),
+          help && h('p', { class: 'muted small' }, help));
+      };
+      options.replaceChildren(
+        num('Upcoming songs', 'plugin.randomplay:newtracks', newtracks, 1, 'How many songs a song or year mix keeps queued ahead.'),
+        num('Played songs to keep', 'plugin.randomplay:oldtracks', oldtracks, 0, 'Older songs are removed from the queue as the mix goes on.'),
+        h('div', { class: 'field check' },
+          h('input', { id: 'rp-continuous', type: 'checkbox', checked: +continuous !== 0,
+            onchange: (e) => save('plugin.randomplay:continuous', e.target.checked ? 1 : 0) }),
+          h('label', { for: 'rp-continuous' }, 'Keep adding music', h('span', { class: 'muted small block' }, 'Turn off to queue a single batch instead.'))));
+    }
+
+    refreshStatus();
+    loadGenres();
+    loadOptions();
+    v.cleanup.push(on('player', refreshStatus), on('queue', refreshStatus));
   },
 
   // ------------------------------------------------------------ favorites

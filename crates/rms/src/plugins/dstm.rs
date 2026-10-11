@@ -171,6 +171,10 @@ async fn dont_stop_the_music(server: Arc<Server>, master: Arc<Player>, active: A
     let Some(token) = provider(&master) else {
         return;
     };
+    // a Random Mix keeps the queue going itself (`disableDSTM`)
+    if server.randomplay.active(master.id).is_some() {
+        return;
+    }
 
     let (remaining, count, snap, mixable) = {
         let c = master.controller();
