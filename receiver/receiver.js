@@ -338,8 +338,10 @@ function noteVisible(v) {
 }
 document.addEventListener('visibilitychange', () => noteVisible(!document.hidden));
 
-let canEngine = null;
-decodableFormats().then((d) => { canEngine = d.includes('flc') ? d : []; }).catch(() => { canEngine = []; });
+// What WebCodecs decodes here; asking can take a while on a TV.  The Web Audio player
+// plays raw samples (pcm) without it, so it plays whatever this says.
+const decodable = decodableFormats().catch(() => []);
+const webAudio = typeof AudioContext !== 'undefined' && typeof AudioWorkletNode !== 'undefined';
 
 function onMessage(data, from) {
   if (!data || typeof data !== 'object') return;
@@ -355,17 +357,21 @@ function onMessage(data, from) {
       visible,
     }, from);
   } else if (data.type === 'HELLO') {
-    const answer = () => report('HELLO', {
+    // (within RMS's 3 s for an answer)
+    const late = new Promise((r) => { setTimeout(() => r(null), 2500); });
+    Promise.race([decodable, late]).then((d) => report('HELLO', {
       version: PROTOCOL,
-      engine: (canEngine || []).length > 0 && typeof AudioContext !== 'undefined',
+      engine: webAudio,
       screen,
       webgl2: hasWebGL2(),
       size: `${Math.round(window.screen.width * (window.devicePixelRatio || 1))}x${Math.round(window.screen.height * (window.devicePixelRatio || 1))}`,
-      decodes: canEngine || [],
+      // with WebCodecs; raw samples (pcm) always
+      decodes: d || [],
+      webcodecs: typeof AudioDecoder !== 'undefined',
+      decodesKnown: d !== null,
+      browser: (navigator.userAgent.match(/(?:Chrome|CrKey)\/[\d.]+/g) || []).join(' '),
       visible,
-    }, from);
-    if (canEngine) answer();
-    else setTimeout(answer, 300);
+    }, from));
   } else if (data.type === 'RENDER') {
     onRender(data);
   } else if (data.type === 'TRACK') {

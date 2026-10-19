@@ -65,6 +65,9 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const LINK_FIRST: usize = 8;
 /// How long a receiver that's ready waits for those answers before playing all the same.
 const LINK_WAIT: Duration = Duration::from_secs(2);
+/// Player pref: the formats a Chromecast takes, as its receiver last said (only raw samples
+/// for one whose Web Audio player can't decode FLAC).
+const CAST_FORMATS: &str = "castFormats";
 /// How long the receiver app may take to close when the driver closes it.
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(10);
 const PING_EVERY: Duration = Duration::from_secs(5);
@@ -290,8 +293,19 @@ async fn attempt(server: Arc<Server>, c: Candidate) {
         // FLAC whatever the file: the receiver's Web Audio player decodes it (and Cast's
         // own media handling plays it too).  Raw samples where a synced player can't take
         // FLAC (a browser without WebCodecs, AirPlay): the Web Audio player takes them as
-        // they are, Cast's media handling in a WAV header.
-        formats: vec!["flc".into(), "pcm".into()],
+        // they are, Cast's media handling in a WAV header.  Only raw samples for a TV whose
+        // Web Audio player can't decode FLAC (as its receiver said, the last time).
+        formats: {
+            let learned = server
+                .prefs
+                .player(&mac.to_string())
+                .get_string_list(CAST_FORMATS);
+            if learned.is_empty() {
+                vec!["flc".into(), "pcm".into()]
+            } else {
+                learned
+            }
+        },
         max_sample_rate: 96_000,
         accurate: true,
     };
@@ -555,6 +569,8 @@ struct Cast {
     pongs: bool,
     /// The receiver app plays on Web Audio (as its `HELLO` said; `None`: not yet asked).
     engine: Option<bool>,
+    /// What its Web Audio player plays: what WebCodecs decodes there, and raw samples.
+    engine_formats: Vec<String>,
     /// When the `HELLO` went, while its answer is awaited.
     hello_asked: Option<Instant>,
     /// The track plays on the receiver's Web Audio player (the server's messages go to it).
@@ -646,6 +662,7 @@ impl Cast {
             ping: None,
             pongs: false,
             engine: None,
+            engine_formats: Vec::new(),
             hello_asked: None,
             engine_active: false,
             ready_held: None,
@@ -1456,7 +1473,8 @@ impl Cast {
             }
         }
         // audio on the receiver's Web Audio player, where it has one
-        if self.engine == Some(true) && item.format != "mp4v" {
+        // (a track it can't decode, sent before it said: Cast's media handling)
+        if self.engine == Some(true) && self.engine_formats.contains(&item.format) {
             return self.engine_load(item, false).await;
         }
         if std::mem::take(&mut self.engine_active) {
@@ -1597,8 +1615,20 @@ impl Cast {
             return Ok(());
         }
         let engine = p["engine"] == true && p["version"].as_u64().is_some_and(|v| v >= 3);
+        let mut decodes: Vec<String> = p["decodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|d| d.as_str().map(str::to_string))
+            .collect();
+        // (a receiver that didn't list them offered Web Audio only with FLAC)
+        if engine && !p["decodes"].is_array() {
+            decodes.push("flc".into());
+        }
+        decodes.push("pcm".into());
         info!(
-            "chromecast {}: the receiver plays on {} (screen {}, WebGL 2 {}, {})",
+            "chromecast {}: the receiver plays on {} (screen {}, WebGL 2 {}, {}; WebCodecs {}, \
+             decodes {}{}; {})",
             self.mac,
             if engine {
                 "Web Audio"
@@ -1607,9 +1637,42 @@ impl Cast {
             },
             p["screen"],
             p["webgl2"],
-            p["size"]
+            p["size"],
+            p["webcodecs"],
+            decodes.join(", "),
+            if p["decodesKnown"] == false {
+                " (still asking)"
+            } else {
+                ""
+            },
+            p["browser"].as_str().unwrap_or("browser unknown"),
         );
         self.engine = Some(engine);
+        self.engine_formats = if engine { decodes } else { Vec::new() };
+        // a Web Audio player that can't decode FLAC gets raw samples (from the next track),
+        // and this is remembered for the next connection
+        if engine && p["decodesKnown"] != false {
+            let formats: Vec<String> = if self.engine_formats.iter().any(|f| f == "flc") {
+                vec!["flc".into(), "pcm".into()]
+            } else {
+                vec!["pcm".into()]
+            };
+            if let Some(player) = self.server.player(&self.mac) {
+                let mut st = player.state.lock();
+                if st.caps.formats != formats {
+                    info!(
+                        "chromecast {}: it's sent {} from now on",
+                        self.mac,
+                        formats.join(", ")
+                    );
+                    st.caps.formats = formats.clone();
+                }
+            }
+            self.server
+                .prefs
+                .player(&self.mac.to_string())
+                .set(CAST_FORMATS, json!(formats));
+        }
         // what discovery couldn't say (a device given by address)
         if let Some(screen) = p["screen"].as_bool() {
             crate::viz::note_screen(self.mac, Some(screen));

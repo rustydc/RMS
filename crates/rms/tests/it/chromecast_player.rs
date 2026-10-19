@@ -161,7 +161,27 @@ impl Fake {
     /// in RENDER, its reports in REPORT): its clock reads `offset` ms more than the tests'
     /// (`stamp`), and it starts playing `lag` after the moment it's told.
     async fn start_engine(ip: &str, offset: f64, lag: Duration) -> Fake {
-        Fake::start_with(ip, None, Some(EngineOpts { offset, lag })).await
+        Fake::start_with(
+            ip,
+            None,
+            Some(EngineOpts {
+                offset,
+                lag,
+                flac: true,
+            }),
+        )
+        .await
+    }
+
+    /// A device whose Web Audio player can't decode FLAC (no WebCodecs for it): it plays raw
+    /// samples.
+    async fn start_engine_pcm(ip: &str) -> Fake {
+        let opts = EngineOpts {
+            offset: 0.0,
+            lag: Duration::ZERO,
+            flac: false,
+        };
+        Fake::start_with(ip, None, Some(opts)).await
     }
 
     async fn start_with(ip: &str, live: Option<Duration>, engine: Option<EngineOpts>) -> Fake {
@@ -273,6 +293,8 @@ struct EngineOpts {
     offset: f64,
     /// It starts playing this long after the moment it's told.
     lag: Duration,
+    /// WebCodecs decodes FLAC there.
+    flac: bool,
 }
 
 /// The fake receiver's Web Audio player.
@@ -329,8 +351,13 @@ async fn serve(
                     (NS_VIZ, "HELLO") => out.push(reply(
                         NS_VIZ,
                         json!({"type": "HELLO", "version": 3, "engine": engine_opts.is_some(),
-                               "screen": true, "webgl2": true, "size": "1920x1080",
-                               "visible": visible}),
+                        "screen": true, "webgl2": true, "size": "1920x1080",
+                        "visible": visible, "decodesKnown": true,
+                        "decodes": if engine_opts.is_some_and(|e| !e.flac) {
+                            json!([])
+                        } else {
+                            json!(["flc", "ops"])
+                        }}),
                     )),
                     (NS_VIZ, "RENDER") => {
                         let cmd = &p["cmd"];
@@ -1942,4 +1969,63 @@ async fn turning_a_chromecast_off_closes_the_receiver() {
     // on again and playing: launched afresh
     command(http, &id, json!({"command": "play"})).await;
     dev.expect_type(NS_RECEIVER, "LAUNCH").await;
+}
+
+/// A TV whose Web Audio player can't decode FLAC gets raw samples for it, once its
+/// receiver has said (the track sent before plays through Cast's media handling).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_chromecast_without_flac_plays_raw_samples_on_web_audio() {
+    need_ffmpeg!();
+    let dir = tempfile::tempdir().unwrap();
+    let m = dir.path();
+    for (i, t) in ["One", "Two"].iter().enumerate() {
+        make_audio(
+            &m.join(format!("A/Album/0{} {t}.flac", i + 1)),
+            i as u32 + 1,
+            &[
+                ("title", t),
+                ("artist", "A"),
+                ("album", "Album"),
+                ("track", &(i + 1).to_string()),
+            ],
+        );
+    }
+    let server = start_server(m);
+    let http = server.http;
+    for _ in 0..100 {
+        if get(http, "/api/v1/server").await["library"]["tracks"] == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let mut dev = Fake::start_engine_pcm("127.0.0.1").await;
+    pref(
+        http,
+        "chromecastHosts",
+        &json!([format!("127.0.0.1:{}", dev.port)]).to_string(),
+    )
+    .await;
+    pref(http, "visualizerReceiverApp", TEST_APP).await;
+    pref(http, "bridgeChromecast", "1").await;
+    let id = cast_players(http, 1).await.remove(0).1;
+
+    command(
+        http,
+        &id,
+        json!({"command": "enqueue", "item": {"type": "album", "id": 1}}),
+    )
+    .await;
+    // the first track went out as FLAC before the receiver said
+    let first = dev.expect_type(NS_MEDIA, "LOAD").await;
+    assert_eq!(first["media"]["contentType"], "audio/flac", "{first}");
+
+    command(http, &id, json!({"command": "stop"})).await;
+    command(http, &id, json!({"command": "play"})).await;
+    let render = dev
+        .expect("raw samples on Web Audio", |v| {
+            v["type"] == "RENDER" && v["cmd"]["type"] == "load"
+        })
+        .await;
+    assert_eq!(render["cmd"]["format"], "pcm", "{render}");
+    assert!(render["cmd"]["pcm"]["rate"].is_number(), "{render}");
 }

@@ -37,7 +37,12 @@ console.
   gets a newer version reports it as an error.
 - **Its own namespace,** `urn:x-cast:net.rms.visualizer`:
   - RMS first sends `{"type": "HELLO"}`; the page answers `{"type": "HELLO", "version": 3,
-    "engine": true, "decodes": ["flc", "ops"]}`. `engine` means it plays audio on Web Audio.
+    "engine": true, "decodes": ["flc", "ops"], "webcodecs": true, "decodesKnown": true,
+    "browser": "Chrome/124.0…", …}`. `engine` means it plays audio on Web Audio (it has
+    Web Audio with AudioWorklet). `decodes` is what WebCodecs decodes there; raw samples
+    (`pcm`) play without it. RMS sends a TV without FLAC in `decodes` raw samples, and
+    remembers that (the player pref `castFormats`). The page waits up to 2.5 s for what
+    it decodes (`decodesKnown`: false if it didn't learn it in time).
   - Then RMS sends the server's renderer messages as they are, in
     `{"type": "RENDER", "cmd": {...}}`: `load` (with `url`, `format`, `autostart`), `preload`,
     `pause`, `resume` (with `at`, a moment of this page's clock), `hold`, `skip`, `stop`. A
